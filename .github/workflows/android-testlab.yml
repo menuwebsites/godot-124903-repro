@@ -1,0 +1,73 @@
+name: "Android Test Lab APK (debug)"
+on:
+  workflow_dispatch:
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GODOT_VERSION: "4.6.3"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+      # No setup-android action: it fails on stock runners trying to
+      # install the obsolete 'tools' package (sdkmanager exit 1). The
+      # ubuntu image already ships the SDK; use its cmdline-tools.
+      - name: Install Android platform + build tools
+        run: |
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKMGR="$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | sort -V | tail -1)"
+          if [ ! -x "$SDKMGR" ]; then SDKMGR="sdkmanager"; fi
+          yes | "$SDKMGR" --licenses > /dev/null
+          "$SDKMGR" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+      - name: Download Godot + export templates
+        run: |
+          mkdir -p "$HOME/.local/share/godot/export_templates"
+          curl -fL -o /tmp/godot.zip "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          python3 -c "import zipfile; zipfile.ZipFile('/tmp/godot.zip').extractall('/tmp/godot')"
+          mv /tmp/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64 /tmp/godot/godot
+          chmod +x /tmp/godot/godot
+          curl -fL -o /tmp/templates.tpz "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          mkdir -p "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          python3 -c "import zipfile; zipfile.ZipFile('/tmp/templates.tpz').extractall('$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable')"
+          TDIR="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          if [ -d "$TDIR/templates" ]; then mv "$TDIR"/templates/* "$TDIR"/; fi
+          ls "$TDIR"
+      # The repo gitignores android/build/ (pattern "build/"), so the
+      # Gradle template is generated here from the downloaded templates
+      # bundle instead of being committed (its libs/*.aar exceed 100 MB).
+      - name: Install Android build template
+        run: |
+          TDIR="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p android/build
+          python3 -c "import zipfile; zipfile.ZipFile('$TDIR/android_source.zip').extractall('android/build')"
+          chmod +x android/build/gradlew
+          touch android/.gdignore android/build/.gdignore
+          printf '%s.stable' "$GODOT_VERSION" > android/.build_version
+          ls android/build
+      - name: Version code from run number
+        run: sed -i "s/^version\/code=.*/version\/code=${GITHUB_RUN_NUMBER}/" export_presets.cfg
+      - name: Import project
+        run: /tmp/godot/godot --headless --import --path "$PWD"
+      # Slim APK for Test Lab upload: Test Lab virtual devices are ARM
+      # (Pixel 2 Arm) — the x86_64-only variant was skipped as incompatible.
+      # The full 3-arch APK (264 MB) exceeds the browser file-grant limit.
+      - name: Slim to arm64 only (fork Test Lab variant)
+        run: |
+          sed -i 's/^architectures\/armeabi-v7a=true/architectures\/armeabi-v7a=false/' export_presets.cfg
+          sed -i 's/^architectures\/x86_64=true/architectures\/x86_64=false/' export_presets.cfg
+          grep "^architectures/" export_presets.cfg
+      - name: Export debug APK
+        run: |
+          mkdir -p build/android
+          /tmp/godot/godot --headless --path "$PWD" --export-debug "Android" "$PWD/build/android/Repro124903.apk"
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-testlab-apk
+          path: build/android/Repro124903.apk
