@@ -5,11 +5,21 @@ in the render thread teardown when the app is backgrounded and relaunched.
 
 ## Project
 
-Bare Godot 4.6.3 project: one scene (`main.tscn`, a Label, no scripts),
-no plugins, no ads, `gl_compatibility` renderer. Nothing else.
+Bare Godot 4.6.3 project: one scene (`main.tscn`, a 3D scene with a
+continuously rotating box driven by `main.gd`), no plugins, no ads,
+`gl_compatibility` renderer. Nothing else.
 (`textures/vram_compression/import_etc2_astc=true` is set only because
 Godot 4.6.3's Android exporter refuses to validate without it; it is
 unrelated to the crash.)
+
+The scene is animated on purpose: the rotating box keeps the GL
+thread submitting draw calls every frame, so the render thread is
+busy when the app is backgrounded and the engine tears it down.
+An earlier version of this project with a static Label scene did
+NOT reproduce the SIGABRT — its render thread was idle at teardown,
+and the app instead took Godot's force-quit path (SIGKILL, self-
+inflicted) on relaunch. The crash is a race inside that teardown,
+so the render thread has to be doing work when it starts.
 
 ## Steps to reproduce
 
@@ -21,7 +31,8 @@ unrelated to the crash.)
 
 ## Observed result
 
-The app crashes ~25 ms after the relaunch starts:
+In the full game (eMarriagey, a 3D Godot game) the app crashes
+~25 ms after the relaunch starts:
 
 ```
 FORTIFY: pthread_mutex_lock called on a destroyed mutex
