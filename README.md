@@ -7,6 +7,9 @@ in the render thread teardown when the app is backgrounded and relaunched.
 
 Bare Godot 4.6.3 project: one scene (`main.tscn`, a Label, no scripts),
 no plugins, no ads, `gl_compatibility` renderer. Nothing else.
+(`textures/vram_compression/import_etc2_astc=true` is set only because
+Godot 4.6.3's Android exporter refuses to validate without it; it is
+unrelated to the crash.)
 
 ## Steps to reproduce
 
